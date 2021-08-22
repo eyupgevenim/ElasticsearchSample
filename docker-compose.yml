@@ -1,0 +1,126 @@
+version: '2.2'
+
+#https://www.elastic.co/guide/en/elasticsearch/reference/current/docker.html
+#https://www.elastic.co/guide/en/elastic-stack-get-started/current/get-started-docker.html
+#https://marcofranssen.nl/building-a-elasticsearch-cluster-using-docker-compose-and-traefik
+
+#docker-compose up --build 
+#docker-compose -f docker-compose.yml up --build 
+
+services:
+  es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.14.0
+    container_name: es01
+    environment:
+      - node.name=es01
+      - cluster.name=es-docker-cluster
+      - discovery.seed_hosts=es02,es03
+      - cluster.initial_master_nodes=es01,es02,es03
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data01:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+    networks:
+      - elastic
+      - backend
+
+  es02:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.14.0
+    container_name: es02
+    environment:
+      - node.name=es02
+      - cluster.name=es-docker-cluster
+      - discovery.seed_hosts=es01,es03
+      - cluster.initial_master_nodes=es01,es02,es03
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data02:/usr/share/elasticsearch/data
+    networks:
+      - elastic
+
+  es03:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.14.0
+    container_name: es03
+    environment:
+      - node.name=es03
+      - cluster.name=es-docker-cluster
+      - discovery.seed_hosts=es01,es02
+      - cluster.initial_master_nodes=es01,es02,es03
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - data03:/usr/share/elasticsearch/data
+    networks:
+      - elastic
+
+  kib01:
+    image: docker.elastic.co/kibana/kibana:7.14.0
+    container_name: kib01
+    ports:
+      - 5601:5601
+    environment:
+      ELASTICSEARCH_URL: http://es01:9200
+      ELASTICSEARCH_HOSTS: '["http://es01:9200","http://es02:9200","http://es03:9200"]'
+    networks:
+      - elastic
+
+  search.api:
+    image: 'searchapi:${PLATFORM:-linux}-${TAG:-latest}'
+    build:
+        context: .
+        dockerfile: src/Search.API/Dockerfile
+    environment:
+        - ASPNETCORE_ENVIRONMENT=Development
+        - ASPNETCORE_URLS=http://0.0.0.0:80
+        - ElasticsearchSettings__Uris__0=${ELASTIC_URIS:-http://es01:9200}
+    ports:
+        - '5000:80'
+    networks:
+      - backend
+    depends_on:
+        - es01
+        - es02
+        - es03
+
+  search.ui:
+    image: 'searchui:${PLATFORM:-linux}-${TAG:-latest}'
+    build:
+        #context: src/Search.UI/
+        context: .
+        dockerfile: src/Search.UI/Dockerfile
+    ports:
+        - "5101:80"
+    depends_on:
+        - search.api
+        - es01
+        - es02
+        - es03
+
+volumes:
+  data01:
+    driver: local
+  data02:
+    driver: local
+  data03:
+    driver: local
+
+networks:
+  elastic:
+    driver: bridge
+  backend:
+    driver: bridge
